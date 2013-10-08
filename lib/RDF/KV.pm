@@ -4,12 +4,16 @@ use 5.010;
 use strict;
 use warnings FATAL => 'all';
 
-use Moo;
+# might as well use full-blown moose if URI::NamespaceMap uses it
+use Moose;
+use namespace::autoclean;
 
 use Carp         ();
 use Scalar::Util ();
 use XML::RegExp  ();
 
+# XXX remind me to rewrite this using Moo.
+use URI::NamespaceMap;
 
 =head1 NAME
 
@@ -33,7 +37,8 @@ my $TERM = qr/(?:$PLACEHOLDER|
                   :[^[:space:]]*)/xo;
 my $RFC5646 = qr/(?:[A-Za-z]+(?:-[0-9A-Za-z]+)*)/o;
 my $SIMPLE_DESIGNATOR = qr/[:_'@^]/o;
-my $ATOMIC_DESIGNATOR = qr/[:_']/o;
+my $ATOMIC_DESIGNATOR = qr/[:_'#]/o;
+#my $DECL_DESIGNATOR = qr/
 my $DESIGNATOR   = qr/(?:$ATOMIC_DESIGNATOR|\@$RFC5646|\^$TERM)/o;
 my $PARTIAL_STMT = qr/(?:($MODIFIER)\s+)?
                       (?:($TERM)(?:\s+($TERM))?(?:\s+($DESIGNATOR))?|
@@ -77,7 +82,11 @@ my @MAP = qw(designator pdecl gdecl modifier term1 term2 designator
 =cut
 
 has subject => (
-    is => 'ro',
+    is => 'rw',
+);
+
+has graph => (
+    is => 'rw',
 );
 
 has namespaces => (
@@ -118,6 +127,8 @@ sub _parse_key {
     return \%x;
 }
 
+# variants of parameter getters
+
 sub _1 {
     my ($params, $k) = @_;
     $params->get_all($k);
@@ -128,6 +139,24 @@ sub _2 {
     my $val = $params->{$k};
     ref $val ? @$val : $val;
 }
+
+my %GLOBALS = (
+    SUBJECT => sub {
+        my ($self, $val) = @_;
+        $self->subject($val);
+    },
+    GRAPH => sub {
+        my ($self, $val) = @_;
+        $self->graph($val);
+    },
+    PREFIX => sub {
+        my ($self, $val) = @_;
+        # XXX CHECK THIS MUTHA
+        my ($prefix, $uri) = split /\s+/, $val;
+        $self->namespaces->add_mapping($prefix, $uri);
+    },
+);
+
 
 sub process {
     my ($self, $params) = @_;
@@ -140,7 +169,7 @@ sub process {
 
     # run over the parsed parameters
     for my $k (keys %$params) {
-        my $rec = $self->_parse($k) or next;
+        my $rec = $self->_parse_key($k) or next;
 
         my @v   = $sub->($params, $k);
 
@@ -165,7 +194,7 @@ sub process {
             # now deal with designator
             if (defined $rec->{designator}) {
                 my ($a, $b) = ($rec->{designator} =~ /^(.)(.*?)$/);
-                if (defined $b) {
+                if (defined $b and $b ne '') {
                     $rec->{designator} = $a;
                     if ($a eq '@') {
                         $rec->{lang} = $b;
@@ -188,10 +217,13 @@ sub process {
         }
     }
 
+    return [\%globals, \%placeholders, \@statements];
+
     # run over globals
 
     # 
 }
+
 
 =head1 AUTHOR
 
@@ -251,5 +283,7 @@ implied.  See the License for the specific language governing
 permissions and limitations under the License.
 
 =cut
+
+__PACKAGE__->meta->make_immutable;
 
 1; # End of RDF::KV
