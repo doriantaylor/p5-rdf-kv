@@ -37,7 +37,7 @@ our $VERSION = '0.01';
 # to create a more helpful (in the error message sense) parser.
 
 # ok you know what? no. This is waaaaaaay simpler.
-my $MODIFIER     = qr/(?:[=+-]!|![=+-]|!)/o;
+my $MODIFIER     = qr/(?:[+-]!|![+-]|!|=)/o;
 my $PREFIX       = qr/(?:$XML::RegExp::NCName|[A-Za-z][0-9A-Za-z.+-]*)/o;
 my $TERM         = qr/(?:$PREFIX:\S*)/o;
 my $RFC5646      = qr/(?:[A-Za-z]+(?:-[0-9A-Za-z]+)*)/o;
@@ -145,11 +145,12 @@ my %SPECIALS = (
     },
 );
 
-sub _deref_list {
-    my ($vals, $macros) = @_;
+sub _deref_content {
+    my ($val, $macros) = @_;
     my @out;
 
-    for my $v (@$vals) {
+    # if $val is scalar, this loop will run just once.
+    for my $v (ref $val ? @$val : ($val)) {
         # make this versatile
         $v = $v->[0] if ref $v;
 
@@ -294,48 +295,7 @@ sub _massage_macros {
             #warn "replacing values for \$$k";
 
             # replace contents and mark done
-            my @out;
-            for my $vv (@vals) {
-                my ($v, $deref) = @$vv;
-
-                my @chunks;
-                while ($v =~ /\G$MACROS/gco) {
-                    my $pre   = $1;
-                    my $macro = $2 || $3;
-                    my $post  = $4;
-
-                    unless (defined $macro) {
-                        @chunks = ($pre . $post);
-                        #warn @chunks;
-                        next;
-                    }
-
-                    # do the actual macro dereferencing or noop in
-                    # lieu of a bound macro
-                    my @x = $done{$macro} ?
-                        map { "$pre$_$post" } @{$done{$macro}}
-                            : ("$pre$macro$post");
-
-                    # initialize chunks
-                    unless (@chunks) {
-                        @chunks = @x;
-                        next;
-                    }
-
-                    # replace chunks with product of itself and x
-                    my @y;
-                    for my $c (@chunks) {
-                        for my $d (@x) {
-                            push @y, "$c$d";
-                        }
-                    }
-                    @chunks = @y;
-                }
-
-                push @out, @chunks;
-            }
-
-            $done{$k} = \@out;
+            $done{$k} = _deref_content(\@vals, \%done);
         }
         else {
             #warn Data::Dumper::Dumper(\@vals);
@@ -360,6 +320,7 @@ sub process {
     # assume this can also be a Hash::MultiValue
     my $sub = Scalar::Util::blessed($params)
         && $params->can('get_all') ? \&_1 : \&_2;
+    # XXX do we want to do ->isa instead?
 
     my (%macros, %maybe, %neither);
 
@@ -415,35 +376,87 @@ sub process {
         Carp::croak($@);
     };
 
-    # Step 4: dereference macros in statements
+    # add/remove statements
+    my (%pos, %neg);
+    for my $k (keys %maybe) {
+        # Step 4: dereference macros in statements
 
-    # Step 4.1 dereference macros in statement *templates* first so we
-    # can figure out which values need to be dereferenced (since the
-    # terminating $ indicator can be substituted in via macro).
+        # Step 4.1 dereference macros in statement *templates* first
+        # so we can figure out which values need to be dereferenced
+        # (since the terminating $ indicator can be substituted in via
+        # macro).
+        my @k = grep { defined $_ } ($k =~ /$MACRO/og) ?
+            _deref_content($k, \%macros) : ($k);
 
-    # in this case we probably can't be clever and reuse the values
-    # for multiple templates because some may or may not include the
-    # indicator.
+        # we want to check the values for empty strings *before* we
+        # dereference them so it's still possible to express the empty
+        # string through the use of a macro
+        my @v = grep { $_ ne '' } map { s/^\s*(.*?)\s*$/$1/sm }
+            grep { defined $_ } @{maybe{$k} || []};
 
-    # actually we can reuse the values, we just can't parse them until
-    # we've parsed the statement templates, because those tell us what
-    # to do with the values.
+        # very well could loop just once here
+        for my $template (@k) {
 
-    # which also means we have to parse the statement templates
-    # immediately.
+            # nope actually we're parsing the template now
+            my @tokens = ($template =~ /^\s*$PARTIAL_STMT\s*$/smo);
 
-    # there is still the issue of the empty string: what does it mean,
-    # and in what context?
+            # ignore if there wasn't a match XXX WARN SOMEHOW?
+            next unless @tokens;
 
-    # Step 4.2 dereference macros in statement *values* (that asked to be)
+            # do not ignore, however, if this screws up
+            die 'INTERNAL ERROR: regex does not match map'
+                unless @tokens == @MAP;
+
+            # now make a nice hash of the contents
+            my %contents = map { $MAP[$_] => $tokens[$_] } (0..$#MAP);
+
+            # pull out the statement modifier first
+            $contents{modifier} = {
+                map { $_ => 1 } (split //, $contents{modifier} || '') };
+
+            # statement reversal behaviour is not entirely symmetric.
+
+            # + is a noop of the default behaviour: assert S P O or O P S.
+            # = means remove S P * before asserting S P O. (no reversal)
+            # - means either remove S P *, S P O or O P S, but not O P *.
+
+            # thinking { g => { s => { p => [{}, { langordt => {} }] } } }
+
+            # you can tell a blank node from a resource if it starts
+            # with _:
+
+            # for negative wildcards: { g => { s => { p => 1 } } }
+            # since removing S P * overrides any S P O.
+
+            # an empty @v means there was no value for this key that
+            # was more than whitespace/empty string.
 
 
-    # Step 5: parse statement templates
+            # in this case we probably can't be clever and reuse the
+            # values for multiple templates because some may or may
+            # not include the indicator.
 
-    # Step 5.1 expand qnames
+            # actually we can reuse the values, we just can't parse
+            # them until we've parsed the statement templates, because
+            # those tell us what to do with the values.
 
-    # Step 6: generate complete statements
+            # which also means we have to parse the statement
+            # templates immediately.
 
+            # there is still the issue of the empty string: what does
+            # it mean, and in what context?
+
+            # Step 4.2 dereference macros in statement *values* (that
+            # asked to be)
+
+
+            # Step 5: parse statement templates
+
+            # Step 5.1 expand qnames
+
+            # Step 6: generate complete statements
+        }
+    }
 }
 
 =head1 AUTHOR
