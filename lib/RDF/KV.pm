@@ -28,7 +28,6 @@ Version 0.01
 
 our $VERSION = '0.01';
 
-
 # here's ye olde grammar:
 
 # XXX I know I said in the spec that the protocol should be parseable
@@ -46,13 +45,13 @@ my $DECLARATION  = qr/^\s*\$\s+($XML::RegExp::NCName)(?:\s+(\$))?\s*$/mo;
 my $MACRO        = qr/(?:\$\{($XML::RegExp::NCName)\}|
                           \$($XML::RegExp::NCName))/xo;
 my $NOT_MACRO    = qr/(?:(?!\$$XML::RegExp::NCName|
-                              \$\{$XML::RegExp::NCName\}).)*/xo;
+                              \$\{$XML::RegExp::NCName\}).)*/xso;
 my $MACROS       = qr/($NOT_MACRO)(?:$MACRO)?($NOT_MACRO)/smo;
 my $PARTIAL_STMT = qr/^\s*(?:($MODIFIER)\s+)?
                       (?:($TERM)(?:\s+($TERM))?(?:\s+($DESIGNATOR))?|
                           ($TERM)\s+($DESIGNATOR)\s+($TERM)|
                           ($TERM)\s+($TERM)(?:\s+($DESIGNATOR))?\s+($TERM))
-                      (?:\s+(\$))\s*$/xmo;
+                      (?:\s+(\$))?\s*$/xsmo;
 
 my @MAP = qw(modifier term1 term2 designator term1 designator graph
              term1 term2 designator graph deref);
@@ -86,8 +85,8 @@ has subject => (
 
 has graph => (
     is  => 'rw',
-    isa => 'RDF::Trine::Model',
-    
+    isa => 'Str',
+    default => '',
 );
 
 has namespaces => (
@@ -138,8 +137,10 @@ my %SPECIALS = (
         my ($self, $val) = @_;
         # XXX CHECK THIS MUTHA
         for my $v (@$val) {
+            warn $v;
             my ($prefix, $uri) = ($v =~ /^\s*(\S+):\s+(.*)$/)
                 or Carp::croak("Invalid prefix mapping $val");
+            warn $uri;
             $self->namespaces->add_mapping($prefix, $uri);
         }
     },
@@ -156,40 +157,53 @@ sub _deref_content {
 
         my @chunks;
         while ($v =~ /\G$MACROS/gco) {
+            warn "seen me";
             my $pre   = $1;
             my $macro = $2 || $3;
             my $post  = $4;
 
             unless (defined $macro) {
-                @chunks = ($pre . $post);
-                #warn @chunks;
+                if (@chunks) {
+                    @chunks = map { "$_$pre$post" } @chunks;
+                }
+                else {
+                    @chunks = ($pre . $post);
+                }
                 next;
             }
 
             # do the actual macro dereferencing or noop in
             # lieu of a bound macro
-            my @x = $macros->{$macro} ?
-                map { "$pre$_$post" } @{$macros->{$macro}}
-                    : ("$pre$macro$post");
+            my @x = (defined $macros->{$macro} && @{$macros->{$macro}} ?
+                         (map { "$pre$_$post" } @{$macros->{$macro}})
+                             : ("$pre\$$macro$post"));
+
+            warn 'wat: ' . Data::Dumper::Dumper(\@x);
 
             # initialize chunks
             unless (@chunks) {
+                warn 'correct!';
                 @chunks = @x;
                 next;
             }
 
             # replace chunks with product of itself and x
-            my @y;
-            for my $c (@chunks) {
-                for my $d (@x) {
-                    push @y, "$c$d";
+            if (@x) {
+                my @y;
+                for my $c (@chunks) {
+                    for my $d (@x) {
+                        warn 'halp wtf';
+                        push @y, "$c$d";
+                    }
                 }
+                @chunks = @y;
             }
-            @chunks = @y;
         }
 
         push @out, @chunks;
     }
+    warn 'hurr: ' . Data::Dumper::Dumper(\@out);
+
 
     wantarray ? @out : \@out;
 }
@@ -336,7 +350,7 @@ sub process {
             push @{$macros{$name} ||= []}, (map { [$_, int(!!$sigil)] } @v);
         }
         # Step 1.1: set aside candidate statements
-        elsif ($k =~ /^\s*\S+\s+\S+.*?/ || $k =~ /[:$]/) {
+        elsif ($k =~ /^\s*\S+\s+\S+.*?/ or $k =~ /[:\$]/) {
             # valid partial statements will contain space or : or $
             push @{$maybe{$k} ||= []}, @v;
         }
@@ -376,6 +390,10 @@ sub process {
         Carp::croak($@);
     };
 
+    require Data::Dumper;
+    warn Data::Dumper::Dumper(\%macros);
+
+
     # add/remove statements
     my (%pos, %neg);
     for my $k (keys %maybe) {
@@ -391,14 +409,20 @@ sub process {
         # we want to check the values for empty strings *before* we
         # dereference them so it's still possible to express the empty
         # string through the use of a macro
-        my @v = grep { $_ ne '' } map { s/^\s*(.*?)\s*$/$1/sm }
-            grep { defined $_ } @{maybe{$k} || []};
+        my @v = grep { $_ ne '' } map { $_ =~ s/^\s*(.*?)\s*$/$1/sm; $_ }
+            grep { defined $_ } @{$maybe{$k} || []};
+
+        require Data::Dumper;
+        warn Data::Dumper::Dumper($maybe{$k});
 
         # very well could loop just once here
         for my $template (@k) {
+            #warn "lol $template";
 
             # nope actually we're parsing the template now
-            my @tokens = ($template =~ /^\s*$PARTIAL_STMT\s*$/smo);
+            my @tokens = ($template =~ $PARTIAL_STMT);
+
+            #warn scalar @tokens;
 
             # ignore if there wasn't a match XXX WARN SOMEHOW?
             next unless @tokens;
@@ -408,11 +432,65 @@ sub process {
                 unless @tokens == @MAP;
 
             # now make a nice hash of the contents
-            my %contents = map { $MAP[$_] => $tokens[$_] } (0..$#MAP);
+            my %contents;
+            map {
+                $contents{$MAP[$_]} = $tokens[$_] if defined $tokens[$_]
+            } (0..$#MAP);
+
+            # just to recap, %contents can contain, at maximum:
+            # * modifier (reverse statement, negate, etc)
+            # * term1 (either subject or predicate)
+            # * term2 (either predicate or object)
+            # * designator (treat input values as URI/blank/literal[type?])
+            # * graph URI
+            # * macro-dereference instruction
 
             # pull out the statement modifier first
             $contents{modifier} = {
                 map { $_ => 1 } (split //, $contents{modifier} || '') };
+
+            # now deal with designator
+            if ($contents{designator}) {
+                my ($sigil, $symbol) = ($contents{designator} =~ /^(.)(.*)$/);
+
+                Carp::croak("Reversed statement templates " .
+                                "cannot specify literals ($template)")
+                      if ($contents{modifier}{'!'} and $sigil =~ /['@^]/);
+
+                if ($sigil eq '^') {
+                    # expand datatype URI
+                    $symbol = $self->namespaces->uri($symbol) || $symbol;
+                }
+
+                $contents{designator} =
+                    $symbol eq '' ? [$sigil] : [$sigil, $symbol];
+            }
+            else {
+                # single-tick is the default designator for forward
+                # statements, : is for reverse.
+                $contents{designator} = [
+                    $contents{modifier}{'!'} ? ':' : q/'/ ];
+            }
+
+            # now we should expand the rest of the abbreviations
+            for my $which (qw(term1 term2 graph)) {
+                if (defined $contents{$which}) {
+                    my $uri = $self->namespaces->uri($contents{$which})
+                        || $contents{$which};
+                    # XXX should we do some sort of relative uri
+                    # resolution thing?
+                    $contents{$which} = $uri;
+                }
+            }
+
+            # I suppose we can do this now
+            if ($contents{deref}) {
+                # XXX might want to trim bounding whitespace again
+                @v = map { _deref_content($_, \%macros) } @v;
+            }
+
+            require Data::Dumper;
+            warn Data::Dumper::Dumper([\%contents, \@v]);
 
             # statement reversal behaviour is not entirely symmetric.
 
@@ -420,7 +498,132 @@ sub process {
             # = means remove S P * before asserting S P O. (no reversal)
             # - means either remove S P *, S P O or O P S, but not O P *.
 
-            # thinking { g => { s => { p => [{}, { langordt => {} }] } } }
+            # No, you know what? Restricting reverse wildcards is
+            # going to make it a hell of a problem to do things like
+            # completely disconnect one resource from another set of
+            # resources. This protocol has to assume the end user is
+            # allowed to make these kinds of changes. We'll mop up the
+            # permission stuff elsewhere.
+
+            # thinking this oughta do it:
+            # { g => { s => { p => [{ o => 1 }, { langordt => { o => 1 }}]}}}
+
+            my $g = $contents{graph} || $self->graph;
+
+            if ($contents{modifier}{'!'}) {
+                # reverse statement (O P S)
+                my $p = $contents{term1};
+                my $o = $contents{term2} || $self->subject;
+
+                # you know what, it makes no sense for a reverse
+                # statement to be anything but a URI or a blank node.
+
+                if ($contents{modifier}{'-'}) {
+                    # remove these triples
+                    for my $s (@v) {
+                        if ($contents{designator}[0] eq '_') {
+                            $s = '_:' . $s unless $s =~ /^_:/;
+                        }
+
+                        $neg{$g}         ||= {};
+                        $neg{$g}{$s}     ||= {};
+                        $neg{$g}{$s}{$p} ||= [{}, {}];
+                        $neg{$g}{$s}{$p}[0]{$o} = 1 if ref $neg{$g}{$s}{$p};
+                    }
+                }
+                else {
+                    # add these triples
+                    for my $s (@v) {
+                        next if $s eq '';
+                        if ($contents{designator}[0] eq '_') {
+                            $s = '_:' . $s unless $s =~ /^_:/;
+                        }
+
+                        $pos{$g}         ||= {};
+                        $pos{$g}{$s}     ||= {};
+                        $pos{$g}{$s}{$p} ||= [{}, {}];
+                        $pos{$g}{$s}{$p}[0]{$o} = 1 if ref $pos{$g}{$s}{$p};
+                    }
+                }
+            }
+            else {
+                # forward statement (S P O)
+                my ($s, $p);
+                if ($contents{term2}) {
+                    ($s, $p) = @contents{qw(term1 term2)};
+                }
+                else {
+                    $s = $self->subject;
+                    $p = $contents{term1};
+                }
+
+                if ($contents{modifier}{'-'}) {
+                    # remove these triples
+                    $neg{$g}         ||= {};
+                    $neg{$g}{$s}     ||= {};
+                    $neg{$g}{$s}{$p} ||= [{}, {}];
+
+                    if (@v and ref $neg{$g}{$s}{$p}) {
+                        for my $o (@v) {
+                            # empty string is a wildcard on negated
+                            # templates
+                            if ($o eq '') {
+                                $neg{$g}{$s}{$p} = 1;
+                                last;
+                            }
+
+                            # haha holy shit
+                            my $d = $contents{designator};
+                            if ($d->[0] =~ /[_:]/) {
+                                $o = "_:$o" if $d->[0] eq '_' and $o !~ /^_:/;
+                                my $uri = $self->namespaces->uri($o) || $o;
+                                $neg{$g}{$s}{$p}[0]{$uri} = 1;
+                            }
+                            elsif ($d->[0] =~ /[@^]/) {
+                                my $x = join '', @$d;
+                                my $y = $neg{$g}{$s}{$p}[1]{$x} ||= {};
+                                $y->{$o} = 1;
+                            }
+                            else {
+                                my $x = $neg{$g}{$s}{$p}[1]{''} ||= {};
+                                $x->{$o} = 1;
+                            }
+                        }
+                    }
+                }
+                else {
+                    if ($contents{modifier}{'='}) {
+                        # remove triple wildcard
+                        $neg{$g}       ||= {};
+                        $neg{$g}{$s}   ||= {};
+                        $neg{$g}{$s}{$p} = 1;
+                    }
+                    # add triples
+                    $pos{$g}         ||= {};
+                    $pos{$g}{$s}     ||= {};
+                    $pos{$g}{$s}{$p} ||= [{}, {}];
+
+                    for my $o (@v) {
+                        my $d = $contents{designator};
+                        if ($d->[0] =~ /[_:]/) {
+                            next if $o eq '';
+
+                            $o = "_:$o" if $d->[0] eq '_' and $o !~ /^_:/;
+                            my $uri = $self->namespaces->uri($o) || $o;
+                            $pos{$g}{$s}{$p}[0]{$uri} = 1;
+                        }
+                        elsif ($d->[0] =~ /[@^]/) {
+                            my $x = join '', @$d;
+                            my $y = $pos{$g}{$s}{$p}[1]{$x} ||= {};
+                            $y->{$o} = 1;
+                        }
+                        else {
+                            my $x = $pos{$g}{$s}{$p}[1]{''} ||= {};
+                            $x->{$o} = 1;
+                        }
+                    }
+                }
+            }
 
             # you can tell a blank node from a resource if it starts
             # with _:
@@ -457,6 +660,7 @@ sub process {
             # Step 6: generate complete statements
         }
     }
+    return [\%neg, \%pos];
 }
 
 =head1 AUTHOR
