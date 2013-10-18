@@ -170,7 +170,7 @@ sub _add_either {
         $_->isa('RDF::Trine::Node::Blank') ?
             $_->sse : ref $_ ? $_->uri_value : $_ } ($g, $s, $p);
 
-    $set->{$g}         ||= {}
+    $set->{$g}         ||= {};
     $set->{$g}{$s}     ||= {};
     $set->{$g}{$s}{$p} ||= [{}, {}];
 
@@ -307,7 +307,7 @@ sub apply {
                   $model->add_statement($stmt);
               });
 
-    $model_>end_bulk_ops;
+    $model->end_bulk_ops;
 
     1;
 }
