@@ -160,12 +160,50 @@ sub _validate {
         }
     }
 
-    ($s, $p, $o, $g);
+    return ($s, $p, $o, $g);
+}
+
+sub _add_either {
+    my ($set, $s, $p, $o, $g) = @_;
+    # clobber graph, subject and predicate to strings; bnode will be _:
+    ($g, $s, $p) = map {
+        $_->isa('RDF::Trine::Node::Blank') ?
+            $_->sse : ref $_ ? $_->uri_value : $_ } ($g, $s, $p);
+
+    $set->{$g}         ||= {}
+    $set->{$g}{$s}     ||= {};
+    $set->{$g}{$s}{$p} ||= [{}, {}];
+
+    if ($o) {
+        if ($o->isa('RDF::Trine::Node::Literal')) {
+            my $l  = $o->literal_value_language;
+            my $d  = $o->literal_datatype;
+            my $ld = $d ? "^$d" : $l ? "@$l" : '';
+            my $x  = $set->{$g}{$s}{$p}[1]{$ld} ||= {};
+            $x->{$o} = 1;
+        }
+        else {
+            $o = $o->isa('RDF::Trine::Node::Blank') ? $o->sse : $o->uri_value;
+            $set->{$g}{$s}{$p}[0]{$o} = 1;
+        }
+    }
+    else {
+        $set->{$g}{$s}{$p} = 1;
+    }
 }
 
 sub add_this {
     my $self = shift;
     my ($s, $p, $o, $g) = _validate(@_);
+    Carp::croak('It makes no sense in this context to add a partial statement')
+          unless 3 == grep { ref $_ } ($s, $p, $o);
+
+    my $ret = $g ? RDF::Trine::Statement::Quad->new($s, $p, $o, $g) :
+        RDF::Trine::Statement->new($s, $p, $o);
+
+    _add_either($self->_pos, $s, $p, $o, $g);
+
+    $ret;
 }
 
 =head2 dont_add_this { $S, $P, $O | $statement } [, $graph ]
@@ -188,6 +226,16 @@ Add a statement, or set of terms, to the I<remove> side of the patch.
 sub remove_this {
     my $self = shift;
     my ($s, $p, $o, $g) = _validate(@_);
+
+    Carp::croak('If you want to nuke the whole graph, just do that directly')
+          unless 1 > grep { ref $_ } ($s, $p, $o);
+
+    my $ret = $g ? RDF::Trine::Statement::Quad->new($s, $p, $o, $g) :
+        RDF::Trine::Statement->new($s, $p, $o);
+
+    _add_either($self->_neg, $s, $p, $o, $g);
+
+    $ret;
 }
 
 =head2 dont_remove_this { $S, $P, $O | $statement } [, $graph ]
@@ -203,6 +251,8 @@ sub dont_remove_this {
 }
 
 =head2 apply $model
+
+Apply the patch to an L<RDF::Trine::Model> object.
 
 =cut
 
