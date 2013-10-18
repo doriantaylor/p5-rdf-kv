@@ -14,6 +14,7 @@ use Scalar::Util ();
 use XML::RegExp  ();
 
 # XXX remind me to rewrite this using Moo.
+use URI;
 use URI::NamespaceMap;
 
 =head1 NAME
@@ -84,8 +85,8 @@ has subject => (
 );
 
 has graph => (
-    is  => 'rw',
-    isa => 'Str',
+    is      => 'rw',
+    isa     => 'Str',
     default => '',
 );
 
@@ -95,10 +96,17 @@ has namespaces => (
     default => sub { URI::NamespaceMap->new },
 );
 
+has callback => (
+    is      => 'ro',
+    isa     => 'CodeRef',
+    default => sub { sub { shift } },
+);
+
 has _placeholders => (
     is => 'ro',
     default => sub { {} },
 );
+
 has _statements => (
     is => 'ro',
     default => sub { [] },
@@ -518,11 +526,17 @@ sub process {
                 # you know what, it makes no sense for a reverse
                 # statement to be anything but a URI or a blank node.
 
+                next unless $contents{designator}[0] =~ /[_:]/;
+
                 if ($contents{modifier}{'-'}) {
                     # remove these triples
                     for my $s (@v) {
                         if ($contents{designator}[0] eq '_') {
                             $s = '_:' . $s unless $s =~ /^_:/;
+                        }
+                        else {
+                            $s = URI->new_abs($s, $o);
+                            $s = $self->callback->($s) if $self->callback;
                         }
 
                         $neg{$g}         ||= {};
@@ -537,6 +551,10 @@ sub process {
                         next if $s eq '';
                         if ($contents{designator}[0] eq '_') {
                             $s = '_:' . $s unless $s =~ /^_:/;
+                        }
+                        else {
+                            $s = URI->new_abs($s, $o);
+                            $s = $self->callback->($s) if $self->callback;
                         }
 
                         $pos{$g}         ||= {};
@@ -556,6 +574,9 @@ sub process {
                     $s = $self->subject;
                     $p = $contents{term1};
                 }
+
+                # (potentially) rewrite the URI
+                $s = $self->callback->($s) if $self->callback;
 
                 if ($contents{modifier}{'-'}) {
                     # remove these triples
@@ -577,6 +598,11 @@ sub process {
                             if ($d->[0] =~ /[_:]/) {
                                 $o = "_:$o" if $d->[0] eq '_' and $o !~ /^_:/;
                                 my $uri = $self->namespaces->uri($o) || $o;
+                                if ($d->[0] eq ':') {
+                                    $uri = URI->new_abs($uri, $s);
+                                    $uri = $self->callback->($uri)
+                                        if $self->callback;
+                                }
                                 $neg{$g}{$s}{$p}[0]{$uri} = 1;
                             }
                             elsif ($d->[0] =~ /[@^]/) {
@@ -610,6 +636,11 @@ sub process {
 
                             $o = "_:$o" if $d->[0] eq '_' and $o !~ /^_:/;
                             my $uri = $self->namespaces->uri($o) || $o;
+                            if ($d->[0] eq ':') {
+                                $uri = URI->new_abs($uri, $s);
+                                $uri = $self->callback->($uri)
+                                    if $self->callback;
+                            }
                             $pos{$g}{$s}{$p}[0]{$uri} = 1;
                         }
                         elsif ($d->[0] =~ /[@^]/) {
