@@ -13,9 +13,12 @@ use Carp         ();
 use Scalar::Util ();
 use XML::RegExp  ();
 
-# XXX remind me to rewrite this using Moo.
 use URI;
+use URI::BNode;
 use URI::NamespaceMap;
+# XXX remind me to rewrite this using Moo.
+
+use RDF::KV::Patch;
 
 =head1 NAME
 
@@ -37,7 +40,7 @@ our $VERSION = '0.01';
 # to create a more helpful (in the error message sense) parser.
 
 # ok you know what? no. This is waaaaaaay simpler.
-my $MODIFIER     = qr/(?:[+-]!|![+-]|!|=)/o;
+my $MODIFIER     = qr/(?:[!=+-]|[+-]!|![+-])/o;
 my $PREFIX       = qr/(?:$XML::RegExp::NCName|[A-Za-z][0-9A-Za-z.+-]*)/o;
 my $TERM         = qr/(?:$PREFIX:\S*)/o;
 my $RFC5646      = qr/(?:[A-Za-z]+(?:-[0-9A-Za-z]+)*)/o;
@@ -103,13 +106,19 @@ has callback => (
 );
 
 has _placeholders => (
-    is => 'ro',
+    is      => 'ro',
     default => sub { {} },
 );
 
 has _statements => (
-    is => 'ro',
+    is      => 'ro',
     default => sub { [] },
+);
+
+has _patch => (
+    is      => 'ro',
+    isa     => 'RDF::KV::Patch',
+    default => sub { RDF::KV::Patch->new },
 );
 
 
@@ -145,10 +154,10 @@ my %SPECIALS = (
         my ($self, $val) = @_;
         # XXX CHECK THIS MUTHA
         for my $v (@$val) {
-            warn $v;
+            #warn $v;
             my ($prefix, $uri) = ($v =~ /^\s*(\S+):\s+(.*)$/)
                 or Carp::croak("Invalid prefix mapping $val");
-            warn $uri;
+            #warn $uri;
             $self->namespaces->add_mapping($prefix, $uri);
         }
     },
@@ -165,7 +174,7 @@ sub _deref_content {
 
         my @chunks;
         while ($v =~ /\G$MACROS/gco) {
-            warn "seen me";
+            #warn "seen me";
             my $pre   = $1;
             my $macro = $2 || $3;
             my $post  = $4;
@@ -186,11 +195,11 @@ sub _deref_content {
                          (map { "$pre$_$post" } @{$macros->{$macro}})
                              : ("$pre\$$macro$post"));
 
-            warn 'wat: ' . Data::Dumper::Dumper(\@x);
+            #warn 'wat: ' . Data::Dumper::Dumper(\@x);
 
             # initialize chunks
             unless (@chunks) {
-                warn 'correct!';
+                #warn 'correct!';
                 @chunks = @x;
                 next;
             }
@@ -200,7 +209,7 @@ sub _deref_content {
                 my @y;
                 for my $c (@chunks) {
                     for my $d (@x) {
-                        warn 'halp wtf';
+                        #warn 'halp wtf';
                         push @y, "$c$d";
                     }
                 }
@@ -210,7 +219,7 @@ sub _deref_content {
 
         push @out, @chunks;
     }
-    warn 'hurr: ' . Data::Dumper::Dumper(\@out);
+    #warn 'hurr: ' . Data::Dumper::Dumper(\@out);
 
 
     wantarray ? @out : \@out;
@@ -398,11 +407,12 @@ sub process {
         Carp::croak($@);
     };
 
-    require Data::Dumper;
-    warn Data::Dumper::Dumper(\%macros);
+    #require Data::Dumper;
+    #warn Data::Dumper::Dumper(\%macros);
 
 
     # add/remove statements
+    my $patch = RDF::KV::Patch->new;
     my (%pos, %neg);
     for my $k (keys %maybe) {
         # Step 4: dereference macros in statements
@@ -420,8 +430,8 @@ sub process {
         my @v = grep { $_ ne '' } map { $_ =~ s/^\s*(.*?)\s*$/$1/sm; $_ }
             grep { defined $_ } @{$maybe{$k} || []};
 
-        require Data::Dumper;
-        warn Data::Dumper::Dumper($maybe{$k});
+        #require Data::Dumper;
+        #warn Data::Dumper::Dumper($maybe{$k});
 
         # very well could loop just once here
         for my $template (@k) {
@@ -497,8 +507,8 @@ sub process {
                 @v = map { _deref_content($_, \%macros) } @v;
             }
 
-            require Data::Dumper;
-            warn Data::Dumper::Dumper([\%contents, \@v]);
+            #require Data::Dumper;
+            #warn Data::Dumper::Dumper([\%contents, \@v]);
 
             # statement reversal behaviour is not entirely symmetric.
 
@@ -521,7 +531,10 @@ sub process {
             if ($contents{modifier}{'!'}) {
                 # reverse statement (O P S)
                 my $p = $contents{term1};
-                my $o = $contents{term2} || $self->subject;
+                my $o = URI::BNode->new($contents{term2} || $self->subject);
+
+                # don't forget to do this
+                $o = $self->callback->($o) if $self->callback;
 
                 # you know what, it makes no sense for a reverse
                 # statement to be anything but a URI or a blank node.
@@ -543,6 +556,8 @@ sub process {
                         $neg{$g}{$s}     ||= {};
                         $neg{$g}{$s}{$p} ||= [{}, {}];
                         $neg{$g}{$s}{$p}[0]{$o} = 1 if ref $neg{$g}{$s}{$p};
+
+                        $patch->remove_this($s, $p, $o, $g);
                     }
                 }
                 else {
@@ -561,6 +576,8 @@ sub process {
                         $pos{$g}{$s}     ||= {};
                         $pos{$g}{$s}{$p} ||= [{}, {}];
                         $pos{$g}{$s}{$p}[0]{$o} = 1 if ref $pos{$g}{$s}{$p};
+
+                        $patch->add_this($s, $p, $o, $g);
                     }
                 }
             }
@@ -590,6 +607,7 @@ sub process {
                             # templates
                             if ($o eq '') {
                                 $neg{$g}{$s}{$p} = 1;
+                                $patch->remove_this($s, $p, $o, $g);
                                 last;
                             }
 
@@ -604,16 +622,22 @@ sub process {
                                         if $self->callback;
                                 }
                                 $neg{$g}{$s}{$p}[0]{$uri} = 1;
+
+                                $o = $uri;
                             }
                             elsif ($d->[0] =~ /[@^]/) {
                                 my $x = join '', @$d;
                                 my $y = $neg{$g}{$s}{$p}[1]{$x} ||= {};
                                 $y->{$o} = 1;
+                                $o = [$o, $d->[0] eq '@' ?
+                                          $d->[1] : (undef, $d->[1])];
                             }
                             else {
                                 my $x = $neg{$g}{$s}{$p}[1]{''} ||= {};
                                 $x->{$o} = 1;
                             }
+
+                            $patch->remove_this($s, $p, $o, $g);
                         }
                     }
                 }
@@ -623,7 +647,10 @@ sub process {
                         $neg{$g}       ||= {};
                         $neg{$g}{$s}   ||= {};
                         $neg{$g}{$s}{$p} = 1;
+
+                        $patch->remove_this($s, $p, undef, $g);
                     }
+
                     # add triples
                     $pos{$g}         ||= {};
                     $pos{$g}{$s}     ||= {};
@@ -641,17 +668,25 @@ sub process {
                                 $uri = $self->callback->($uri)
                                     if $self->callback;
                             }
+
                             $pos{$g}{$s}{$p}[0]{$uri} = 1;
+
+                            $o = $uri;
                         }
                         elsif ($d->[0] =~ /[@^]/) {
                             my $x = join '', @$d;
                             my $y = $pos{$g}{$s}{$p}[1]{$x} ||= {};
                             $y->{$o} = 1;
+
+                            $o = [$o,
+                                  $d->[0] eq '@' ? $d->[1] : (undef, $d->[1])];
                         }
                         else {
                             my $x = $pos{$g}{$s}{$p}[1]{''} ||= {};
                             $x->{$o} = 1;
                         }
+
+                        $patch->add_this($s, $p, $o, $g);
                     }
                 }
             }
@@ -691,7 +726,10 @@ sub process {
             # Step 6: generate complete statements
         }
     }
-    return [\%neg, \%pos];
+
+    #return [\%neg, \%pos];
+
+    return $patch;
 }
 
 =head1 AUTHOR

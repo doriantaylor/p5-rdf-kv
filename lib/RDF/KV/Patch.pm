@@ -1,5 +1,6 @@
 package RDF::KV::Patch;
 
+use 5.010;
 use strict;
 use warnings FATAL => 'all';
 
@@ -7,6 +8,8 @@ use Moose;
 use namespace::autoclean;
 
 use RDF::Trine qw(iri blank literal);
+
+use URI::BNode;
 
 =head1 NAME
 
@@ -51,7 +54,9 @@ Add a statement, or set of terms, to the I<add> side of the patch.
 =cut
 
 sub _validate {
-    my ($s, $p, $o, $g) = @_;
+    # oh undef vs empty string, you're so cute.
+    my ($s, $p, $o, $g) =
+        map { defined $_ && !ref $_ && $_ eq '' ? undef : $_ } @_;
 
     if (defined $s) {
         if (Scalar::Util::blessed($s)) {
@@ -167,8 +172,8 @@ sub _add_either {
     my ($set, $s, $p, $o, $g) = @_;
     # clobber graph, subject and predicate to strings; bnode will be _:
     ($g, $s, $p) = map {
-        $_->isa('RDF::Trine::Node::Blank') ?
-            $_->sse : ref $_ ? $_->uri_value : $_ } ($g, $s, $p);
+        defined $_ ? $_->isa('RDF::Trine::Node::Blank') ?
+            $_->sse : ref $_ ? $_->uri_value : $_ : '' } ($g, $s, $p);
 
     $set->{$g}         ||= {};
     $set->{$g}{$s}     ||= {};
@@ -178,9 +183,12 @@ sub _add_either {
         if ($o->isa('RDF::Trine::Node::Literal')) {
             my $l  = $o->literal_value_language;
             my $d  = $o->literal_datatype;
-            my $ld = $d ? "^$d" : $l ? "@$l" : '';
+            my $ld = $d ? "^$d" : $l ? "\@$l" : '';
             my $x  = $set->{$g}{$s}{$p}[1]{$ld} ||= {};
-            $x->{$o} = 1;
+            $x->{$o->literal_value} = 1;
+        }
+        elsif ($o->isa('RDF::Trine::Node::Variable')) {
+            $set->{$g}{$s}{$p} = 1;
         }
         else {
             $o = $o->isa('RDF::Trine::Node::Blank') ? $o->sse : $o->uri_value;
@@ -200,6 +208,7 @@ sub add_this {
 
     my $ret = $g ? RDF::Trine::Statement::Quad->new($s, $p, $o, $g) :
         RDF::Trine::Statement->new($s, $p, $o);
+    #warn $ret;
 
     _add_either($self->_pos, $s, $p, $o, $g);
 
@@ -227,8 +236,10 @@ sub remove_this {
     my $self = shift;
     my ($s, $p, $o, $g) = _validate(@_);
 
+    #warn Data::Dumper::Dumper([$s, $p, $o, $g]);
+
     Carp::croak('If you want to nuke the whole graph, just do that directly')
-          unless 1 > grep { ref $_ } ($s, $p, $o);
+          unless 1 <= grep { ref $_ } ($s, $p, $o);
 
     my $ret = $g ? RDF::Trine::Statement::Quad->new($s, $p, $o, $g) :
         RDF::Trine::Statement->new($s, $p, $o);
@@ -261,6 +272,7 @@ sub _node {
     return $x eq '' ? undef : $x =~ /^_:(.*)/ ? bnode($1) : iri($x);
 }
 
+# holy lol @ this
 sub _traverse {
     my ($structure, $callback) = @_;
 
@@ -272,19 +284,22 @@ sub _traverse {
                 my $gsp = $structure->{$gg}{$ss}{$pp};
                 my $p = _node($pp);
                 if (!ref $gsp or $gsp->[0]{''}) {
+                    #warn 'lul';
                     $callback->($s, $p, undef, $g);
                 }
                 else {
                     for my $oo (keys %{$gsp->[0]}) {
                         my $o = _node($oo);
+                        #warn "lul $o";
                         $callback->($s, $p, $o, $g);
                     }
                     for my $ld (keys %{$gsp->[1]}) {
                         my ($t, $v) = ($ld =~ /^(.)(.*)$/);
                         my @args = $t ? $t eq '@' ?
                             ($v, undef) : (undef, $v) : ();
-                        for my $ll (keys %{$gsp->[1]{ld}}) {
+                        for my $ll (keys %{$gsp->[1]{$ld}}) {
                             my $o = literal($ll, @args);
+                            #warn 'lul';
                             $callback->($s, $p, $o, $g);
                         }
                     }
@@ -299,11 +314,19 @@ sub apply {
 
     $model->begin_bulk_ops;
 
-    _traverse($self->_neg, sub { $model->remove_statements(@_) });
+    _traverse($self->_neg, sub {
+                  warn join(' ', map { defined $_ ? $_ : '(undef)' } @_);
+                  # fuuuuuuck this quad semantics shit
+                  my @n = map { $_[$_] } (0..3);
+
+                  $model->remove_statements
+                      (defined $n[3] ? @n[0..3] : @n[0..2]) });
     _traverse($self->_pos,
               sub {
-                  my $stmt = @_ > 3 ? RDF::Trine::Statement::Quad->new(@_)
-                      : RDF::Trine::Statement->new(@_);
+                  my $stmt = defined $_[3] ?
+                      RDF::Trine::Statement::Quad->new(@_)
+                            : RDF::Trine::Statement->new(@_[0..2]);
+                  warn $stmt->sse;
                   $model->add_statement($stmt);
               });
 
