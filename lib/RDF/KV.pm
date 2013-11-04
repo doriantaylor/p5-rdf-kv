@@ -22,7 +22,7 @@ use RDF::KV::Patch;
 
 =head1 NAME
 
-RDF::KV - Represent RDF data in key-value pairs
+RDF::KV - Embed RDF linked data in plain old HTML forms
 
 =head1 VERSION
 
@@ -66,32 +66,77 @@ my @MAP = qw(modifier term1 term2 designator term1 designator graph
         subject    => $uri,      # ordinarily the Request-URI
         graph      => $graphuri, # URI for the default graph
         namespaces => $ns,       # default namespace prefix map
+        callback   => \&rewrite, # form-results-rewriting callback
     );
 
     # Processes a hashref-of-parameters, like found in Catalyst or
     # Plack::Request. This call will ignore obviously non-matching
-    # keys, but will croak 
+    # keys, but will croak on botched attempts to use the protocol.
 
-    eval { $kv->process($params) };
+    my $patch = eval { $kv->process($params) };
+    if ($@) {
+        # return 409 Conflict ...
+    }
 
-    # this will croak if 
+    # add/remove statements from the graph
+    $patch->apply($model);
 
-=head1 SUBROUTINES/METHODS
+=head1 DESCRIPTION
+
+This module provides a reference implementation for the L<RDF-KV
+protocol|http://doriantaylor.com/rdf-kv>. The objective of this
+protocol is to convey RDF linked data from a web browser to a web
+server using no mechanism beyond conventional
+C<application/x-www-form-urlencoded> HTML forms. The overarching
+purpose is to facilitate the development of linked data applications
+by making the apparatus of JavaScript an I<optional>, rather than a
+I<mandatory>, consideration.
+
+This protocol implementation works by culling key-value pairs denoted
+in a prescribed syntax from POSTed form input (parsed by something
+like L<CGI>, L<Plack::Request> or L<Catalyst>), and then stitching
+them together to create a L<patch object|RDF::KV::Patch> which is then
+applied to an L<RDF::Trine::Model> graph.
+
+=head1 METHODS
 
 =head2 new
+
+Instantiate the object. The following parameters are also (read-only)
+accessors.
+
+=over 4
+
+=item subject
+
+This is the default subject URI (or blank node).
 
 =cut
 
 has subject => (
     is       => 'rw',
+    isa      => 'Str|URI',
     required => 1,
 );
 
+=item graph
+
+This is the default graph URI.
+
+=cut
+
 has graph => (
     is      => 'rw',
-    isa     => 'Str',
+    isa     => 'Str|URI',
     default => '',
 );
+
+=item namespaces
+
+This L<URI::NamespaceMap> object will enable URI abbreviation through
+the use of CURIEs in form input.
+
+=cut
 
 has namespaces => (
     is      => 'ro',
@@ -99,31 +144,26 @@ has namespaces => (
     default => sub { URI::NamespaceMap->new },
 );
 
+=item callback
+
+Supply a callback function that will be applied to subject and object
+values, for instance to rewrite a URI. The return value of this
+function must be understood by L<RDF::KV::Patch/add_this>.
+
+=cut
+
 has callback => (
     is      => 'ro',
     isa     => 'CodeRef',
     default => sub { sub { shift } },
 );
 
-has _placeholders => (
-    is      => 'ro',
-    default => sub { {} },
-);
+=back
 
-has _statements => (
-    is      => 'ro',
-    default => sub { [] },
-);
+=head2 process \%CONTENT
 
-has _patch => (
-    is      => 'ro',
-    isa     => 'RDF::KV::Patch',
-    default => sub { RDF::KV::Patch->new },
-);
-
-
-=head2 process
-
+Process form content and return an L<RDF::KV::Patch> object. This is
+the only significant method.
 
 =cut
 
@@ -732,6 +772,10 @@ sub process {
     return $patch;
 }
 
+=head1 CAVEATS
+
+B<BYOS> == Bring Your Own Security.
+
 =head1 AUTHOR
 
 Dorian Taylor, C<< <dorian at cpan.org> >>
@@ -773,6 +817,16 @@ L<http://search.cpan.org/dist/RDF-KV/>
 =back
 
 =head1 SEE ALSO
+
+=over 4
+
+=item L<RDF::KV::Patch>
+
+=item L<URI::BNode>
+
+=item L<RDF::Trine>
+
+=back
 
 =head1 LICENSE AND COPYRIGHT
 

@@ -47,6 +47,14 @@ has _neg => (
     default => sub { {} },
 );
 
+=head1 METHODS
+
+=head2 new
+
+Stub constructor, nothing of interest.
+
+=cut
+
 =head2 add_this { $S, $P, $O | $statement } [, $graph ]
 
 Add a statement, or set of terms, to the I<add> side of the patch.
@@ -263,7 +271,9 @@ sub dont_remove_this {
 
 =head2 apply $model
 
-Apply the patch to an L<RDF::Trine::Model> object.
+Apply the patch to an L<RDF::Trine::Model> object. Statements are
+removed first, then added. Transactions
+(i.e. L<RDF::Trine::Model/begin_bulk_ops>) are your responsibility.
 
 =cut
 
@@ -334,6 +344,37 @@ sub apply {
 
     1;
 }
+
+=head1 SEE ALSO
+
+=over 4
+
+=item L<RDF::KV>
+
+=item L<RDF::Trine::Model>
+
+=item L<RDF::Trine::Statement>
+
+=item L<RDF::Trine::Node>
+
+=back
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright 2013 Dorian Taylor.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you
+may not use this file except in compliance with the License.  You may
+obtain a copy of the License at
+L<http://www.apache.org/licenses/LICENSE-2.0>.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied.  See the License for the specific language governing
+permissions and limitations under the License.
+
+=cut
 
 __PACKAGE__->meta->make_immutable;
 
