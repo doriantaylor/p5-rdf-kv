@@ -1,4 +1,6 @@
-#!perl -T
+#!perl
+
+# taint checks make this thing angry
 
 use Test::More tests => 1;
 

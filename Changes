@@ -1,5 +1,10 @@
 Revision history for RDF-KV
 
-0.01    Date/time
-        First version, released on an unsuspecting world.
+0.03    2013-11-03
+        Removing taint check in t/00-load.t which breaks RDF::Trine.
 
+0.02    2013-11-03
+        Fleshed out documentation.
+
+0.01    2013-11-03
+        Initial release of RDF-KV protocol reference implementation.
