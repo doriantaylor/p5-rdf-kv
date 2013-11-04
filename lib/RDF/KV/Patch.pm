@@ -15,6 +15,14 @@ use URI::BNode;
 
 RDF::KV::Patch - Representation of RDF statements to be added or removed
 
+=head1 VERSION
+
+Version 0.02
+
+=cut
+
+our $VERSION = '0.02';
+
 =head1 SYNOPSIS
 
     my $patch = RDF::KV::Patch->new;
@@ -40,7 +48,7 @@ has _pos => (
     default => sub { {} },
 );
 
-# negative statements-or-not
+# negative statements/wildcards
 has _neg => (
     is      => 'ro',
     isa     => 'HashRef',
@@ -58,6 +66,56 @@ Stub constructor, nothing of interest.
 =head2 add_this { $S, $P, $O | $statement } [, $graph ]
 
 Add a statement, or set of terms, to the I<add> side of the patch.
+
+This method and its siblings are fairly robust, and can take a wide
+variety of inputs, from triple and quad statements, to individual
+subject/predicate/object/graph objects, to string literals, to
+variable nodes, to undef. They are processed by the following scheme:
+
+=over 4
+
+=item
+
+If passed a L<RDF::Trine::Statement>, it will be unwound into its
+respective components. The C<graph> attribute of a L<quad
+statement|RDF::Trine::Statement::Quad> supersedes any given graph
+parameter.
+
+=item
+
+The empty string, C<undef>, and L<RDF::Trine::Node::Variable> objects
+are considered to be wildcards, which are only legal in the
+I<negative> side of the patch, since they don't make sense on the
+positive side. Placing wildcards in all three of the subject,
+predicate and object positions will raise an exception, because if
+carried out it would completely empty the graph. If you're sure you
+want to do that, you should use another mechanism.
+
+=item
+
+I<Subjects> are coerced from string literals to L<URI> and
+L<URI::BNode> instances and from there to
+L<RDF::Trine::Node::Resource> and L<RDF::Trine::Node::Blank>
+instances, respectively.
+
+=item
+
+I<Predicates> are always coerced from string literals or L<URI> objects
+into L<RDF::Trine::Node::Resource> objects.
+
+=item
+
+I<Objects> are coerced from either string literals or C<ARRAY>
+references into L<RDF::Trine::Node::Literal> instances, the latter
+case mimicking L<that class's
+constructor|RDF::Trine::Node::Literal/new>. URIs or blank nodes must
+already be at least instances of L<URI> or L<URI::BNode>, if not
+L<RDF::Trine::Node::Resource> or L<RDF::Trine::Node::Blank>. Note: the
+empty string is considered a wildcard, so if you want an actual empty
+string, you will need to pass in an L<RDF::Trine::Node::Literal> with
+that value.
+
+=back
 
 =cut
 
