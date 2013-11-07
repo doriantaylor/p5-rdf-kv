@@ -9,9 +9,11 @@ use Moose;
 use namespace::autoclean;
 use Try::Tiny;
 
-use Carp         ();
-use Scalar::Util ();
-use XML::RegExp  ();
+use Carp               ();
+use Scalar::Util       ();
+use XML::RegExp        ();
+use Data::GUID::Any    ();
+use Data::UUID::NCName ();
 
 use URI;
 use URI::BNode;
@@ -26,11 +28,11 @@ RDF::KV - Embed RDF linked data in plain old HTML forms
 
 =head1 VERSION
 
-Version 0.03
+Version 0.04
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 # here's ye olde grammar:
 
@@ -180,6 +182,18 @@ sub _2 {
     ref $val ? @$val : $val;
 }
 
+sub _uuid4 () {
+    lc Data::GUID::Any::v4_guid_as_string();
+}
+
+sub _uuid4urn () {
+    'urn:uuid:' . _uuid4;
+}
+
+sub _uuid4bn () {
+    URI::BNode->new;
+}
+
 # XXX these should all get syntax checks/CURIE expansion/etc
 my %SPECIALS = (
     SUBJECT => sub {
@@ -201,6 +215,12 @@ my %SPECIALS = (
             $self->namespaces->add_mapping($prefix, $uri);
         }
     },
+);
+
+my %GENERATED = (
+    NEW_UUID     => [[\&_uuid4,    0]],
+    NEW_UUID_URN => [[\&_uuid4urn, 0]],
+    NEW_BNODE    => [[\&_uuid4bn,  0]],
 );
 
 sub _deref_content {
@@ -232,8 +252,13 @@ sub _deref_content {
             # do the actual macro dereferencing or noop in
             # lieu of a bound macro
             my @x = (defined $macros->{$macro} && @{$macros->{$macro}} ?
-                         (map { "$pre$_$post" } @{$macros->{$macro}})
-                             : ("$pre\$$macro$post"));
+                         (map { sprintf('%s%s%s',
+                                        $pre, ref $_ ? &$_ : $_, $post)
+                            } @{$macros->{$macro}}) : ("$pre\$$macro$post"));
+            # XXX LOLOLOL THIS IS THE MOST ILLEGIBLE PILE OF NONSENSE
+
+            # it says: if a macro value is present, sub it or no-op,
+            # but if the macro is a code ref, run it.
 
             #warn 'wat: ' . Data::Dumper::Dumper(\@x);
 
@@ -277,6 +302,9 @@ sub _massage_macros {
 
     # shallow-copy the hash
     my %pending = %$macros;
+
+    # get rid of generated
+    map { delete $pending{$_} } keys %GENERATED;
 
     # Start a queue with a (quasi) random macro.
     my @queue = (keys %pending)[0];
@@ -393,7 +421,10 @@ sub process {
         && $params->can('get_all') ? \&_1 : \&_2;
     # XXX do we want to do ->isa instead?
 
-    my (%macros, %maybe, %neither);
+    # begin by seeding macros with generators
+    my %macros = %GENERATED;
+
+    my (%maybe, %neither);
 
     for my $k (keys %$params) {
         # Step 0: get the values into a homogeneous list
@@ -402,6 +433,9 @@ sub process {
         # Step 1: pull out all the macro declarations
         if (my ($name, $sigil) = ($k =~ $DECLARATION)) {
             # Step 1.0.1: create [content, deref flag] pairs
+
+            # skip over generated macros
+            next if $GENERATED{$name};
 
             # OOH VERY CLEVER
             push @{$macros{$name} ||= []}, (map { [$_, int(!!$sigil)] } @v);
@@ -433,7 +467,9 @@ sub process {
     };
 
     # Step 2.1: overwrite any reserved/magic macros
-    $macros{NEWUUID} = [[sub {  }, 0]];
+    #$macros{NEW_UUID}     = [[\&_uuid4,    1]];
+    #$macros{NEW_UUID_URN} = [[\&_uuid4urn, 1]];
+    #$macros{NEW_BNODE}    = [[\&_uuid4bn,  1]];
     # XXX make this extensible?
 
     # Step 3: apply special control macros to $self

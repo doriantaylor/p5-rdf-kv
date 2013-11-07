@@ -6,6 +6,7 @@ use warnings FATAL => 'all';
 use Plack::Request;
 
 use RDF::KV;
+use RDF::Trine;
 
 my $app = sub {
     my $env = shift;
@@ -18,8 +19,12 @@ my $app = sub {
     if ($method eq 'POST') {
         my $kv = RDF::KV->new(subject => $req->uri);
         my $x = $kv->process($req->body_parameters);
+
+        my $model = RDF::Trine::Model->temporary_model;
+        $x->apply($model);
+        my $ser = RDF::Trine::Serializer->new('turtle');
         require Data::Dumper;
-        $res->body(Data::Dumper::Dumper($x));
+        $res->body($ser->serialize_model_to_string($model));
     }
     elsif ($method eq 'GET' or $method eq 'HEAD') {
         # i dunno

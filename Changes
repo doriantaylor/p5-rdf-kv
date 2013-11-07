@@ -1,7 +1,10 @@
 Revision history for RDF-KV
 
+0.04    2013-11-03
+        Added dependency for XML::RegExp, as well as macro generators.
+
 0.03    2013-11-03
-        Removing taint check in t/00-load.t which breaks RDF::Trine.
+        Removed taint check in t/00-load.t which breaks loading of RDF::Trine.
 
 0.02    2013-11-03
         Fleshed out documentation.
