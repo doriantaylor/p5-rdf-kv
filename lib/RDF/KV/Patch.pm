@@ -17,11 +17,11 @@ RDF::KV::Patch - Representation of RDF statements to be added or removed
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 SYNOPSIS
 
@@ -383,7 +383,7 @@ sub apply {
     $model->begin_bulk_ops;
 
     _traverse($self->_neg, sub {
-                  warn join(' ', map { defined $_ ? $_ : '(undef)' } @_);
+                  #warn join(' ', map { defined $_ ? $_ : '(undef)' } @_);
                   # fuuuuuuck this quad semantics shit
                   my @n = map { $_[$_] } (0..3);
 
@@ -394,7 +394,7 @@ sub apply {
                   my $stmt = defined $_[3] ?
                       RDF::Trine::Statement::Quad->new(@_)
                             : RDF::Trine::Statement->new(@_[0..2]);
-                  warn $stmt->sse;
+                  #warn $stmt->sse;
                   $model->add_statement($stmt);
               });
 
