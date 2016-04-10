@@ -6,6 +6,7 @@ use warnings FATAL => 'all';
 
 # might as well use full-blown moose if URI::NamespaceMap uses it
 use Moose;
+use Moose::Util::TypeConstraints;
 use namespace::autoclean;
 use Try::Tiny;
 
@@ -28,11 +29,13 @@ RDF::KV - Embed RDF linked data in plain old HTML forms
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
+
+class_type 'URI';
 
 # here's ye olde grammar:
 
