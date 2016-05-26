@@ -387,10 +387,13 @@ sub apply {
                   # fuuuuuuck this quad semantics shit
                   my @n = map { $_[$_] } (0..3);
 
+                  #warn "found context $n[3]" if defined $n[3];
+
                   $model->remove_statements
                       (defined $n[3] ? @n[0..3] : @n[0..2]) });
     _traverse($self->_pos,
               sub {
+                  #warn "found context $_[3]" if defined $_[3];
                   my $stmt = defined $_[3] ?
                       RDF::Trine::Statement::Quad->new(@_)
                             : RDF::Trine::Statement->new(@_[0..2]);

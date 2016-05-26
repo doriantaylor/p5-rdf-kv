@@ -17,4 +17,4 @@ isa_ok($patch, 'RDF::KV::Patch');
 my $ret = $patch->add_this
     ('_:wat', 'http://purl.org/dc/terms/title', literal('derps', undef, 'xsd:string'));
 
-warn $ret->sse;
+diag($ret->sse);
