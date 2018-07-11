@@ -17,11 +17,11 @@ RDF::KV::Patch - Representation of RDF statements to be added or removed
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 =head1 SYNOPSIS
 
@@ -197,7 +197,12 @@ sub _validate {
                 }
             }
             elsif ($ref eq 'ARRAY') {
-                $o = literal(@$o);
+                my ($lv, $lang, $dt) = @$o;
+                if (ref $dt and Scalar::Util::blessed($dt)) {
+                    $dt = $dt->can('uri_value') ? $dt->uri_value :
+                        $dt->can('as_string') ? $dt->as_string : "$dt";
+                }
+                $o = literal($lv, $lang, $dt);
             }
             else {
                 # dunno
@@ -378,6 +383,8 @@ sub _traverse {
                         my ($t, $v) = ($ld =~ /^(.)(.*)$/);
                         my @args = $t ? $t eq '@' ?
                             ($v, undef) : (undef, $v) : ();
+                        # of course the datatype is always a string
+                        # here so no need to check it for blessedness
                         for my $ll (keys %{$gsp->[1]{$ld}}) {
                             my $o = literal($ll, @args);
                             #warn 'lul';
