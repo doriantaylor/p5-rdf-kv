@@ -17,11 +17,11 @@ RDF::KV::Patch - Representation of RDF statements to be added or removed
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =cut
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 =head1 SYNOPSIS
 
@@ -428,13 +428,14 @@ sub _apply {
 
 sub apply {
     my ($self, $remove, $add) = @_;
-    return $self->_apply($remove) if Scalar::Util::blessed($remove)
-        and $remove->isa('RDF::Trine::Model');
 
-    _traverse($self->_neg, $remove);
-    _traverse($self->_pos, $add);
-
-    1;
+    # note remove may be a coderef or a model
+    if (ref $remove eq 'CODE') {
+        _traverse($self->_neg, $remove);
+        _traverse($self->_pos, $add) if $add;
+        return 1;
+    }
+    $self->_apply($remove) if Scalar::Util::blessed($remove);
 }
 
 =head1 SEE ALSO
