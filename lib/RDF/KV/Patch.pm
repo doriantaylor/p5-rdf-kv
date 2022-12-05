@@ -17,11 +17,11 @@ RDF::KV::Patch - Representation of RDF statements to be added or removed
 
 =head1 VERSION
 
-Version 0.10
+Version 0.12
 
 =cut
 
-our $VERSION = '0.10';
+our $VERSION = '0.12';
 
 =head1 SYNOPSIS
 
@@ -332,14 +332,14 @@ sub dont_remove_this {
     my ($s, $p, $o, $g) = _validate(@_);
 }
 
-=head2 graphs_affected
+=head2 affected_graphs
 
 Return the set of graph identifiers affected by the patch, including
 C<undef> for the null graph.
 
 =cut
 
-sub graphs_affected {
+sub affected_graphs {
     my $self = shift;
     my %seen;
 
@@ -355,7 +355,7 @@ irrespective of graph.
 
 =cut
 
-sub subjects_affected {
+sub affected_subjects {
     my ($self, $use_graphs) = @_;
     my %seen;
 

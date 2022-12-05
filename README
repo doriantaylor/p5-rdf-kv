@@ -2,7 +2,7 @@ NAME
     RDF::KV - Embed RDF linked data in plain old HTML forms
 
 VERSION
-    Version 0.10
+    Version 0.12
 
 SYNOPSIS
         my $kv = RDF::KV->new(
