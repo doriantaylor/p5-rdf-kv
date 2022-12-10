@@ -41,10 +41,7 @@ jobs:
         cpanm -v
         cpanm --notest Module::Install::ReadmeFromPod
         cpanm --installdeps --notest .
-        #cpanm --notest Moose URI::BNode RDF::Trine URI::NamespaceMap XML::RegExp Data::UUID::NCName Data::GUID::Any
         cpanm --notest Test::Pod::Coverage Test::Pod Test::CheckManifest
-        # The test using Test::CheckManifest fails without the Module::Install which now not used because of this issue:
-        # https://github.com/doriantaylor/p5-rdf-kv/issues/2
 
     - name: Show Errors on Windows
       if:  ${{ failure() && startsWith( matrix.runner, 'windows-')}}
@@ -68,9 +65,9 @@ jobs:
         AUTHOR_TESTING: 1
         RELEASE_TESTING: 1
       run: |
-        prove -l
-        #perl Makefile.PL
-        #make
-        #make test
+        #prove -l
+        perl Makefile.PL
+        make
+        make test
 
 
