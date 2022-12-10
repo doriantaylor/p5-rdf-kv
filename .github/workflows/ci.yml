@@ -39,9 +39,10 @@ jobs:
     - name: Install Modules
       run: |
         cpanm -v
-        #cpanm --installdeps --notest .
-        cpanm --notest Moose URI::BNode RDF::Trine URI::NamespaceMap XML::RegExp Data::UUID::NCName Data::GUID::Any
-        cpanm --notest Test::Pod::Coverage Test::Pod
+        cpanm --notest Module::Install::ReadmeFromPod
+        cpanm --installdeps --notest .
+        #cpanm --notest Moose URI::BNode RDF::Trine URI::NamespaceMap XML::RegExp Data::UUID::NCName Data::GUID::Any
+        #cpanm --notest Test::Pod::Coverage Test::Pod
         # The test using Test::CheckManifest fails without the Module::Install which now not used because of this issue:
         # https://github.com/doriantaylor/p5-rdf-kv/issues/2
 
